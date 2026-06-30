@@ -14,17 +14,24 @@ type PartitionLog struct {
 
 func (l *PartitionLog) Append(message string) int {
 	// TODO
-	return 0
+	if l == nil {
+		return 0
+	}
+	l.messages = append(l.messages, message)
+	return len(l.messages) - 1
 }
 
 func (l *PartitionLog) Read(offset int) (string, error) {
 	// TODO: return message at offset, or error if out of range
-	return "", nil
+	if offset > len(l.messages)-1 || offset < 0 {
+		return "", fmt.Errorf("ERROR: offset out of range")
+	}
+	return l.messages[offset], nil
 }
 
 func (l *PartitionLog) Tail() int {
 	// TODO: return next offset to be assigned
-	return 0
+	return len(l.messages)
 }
 
 func main() {

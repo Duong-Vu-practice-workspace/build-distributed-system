@@ -73,10 +73,39 @@ func ValidateMessage(msg Message) (bool, string) {
 
 	return true, ""
 }
-func (n *Node) SyncRpc(request Message, body map[string]interface{}) (map[string]interface{}, error) {
-	msg_id := n.Send(request.Dest, body)
 
+func (n *Node) SyncRpc(request Message, body map[string]interface{}) (map[string]interface{}, error) {
+	msgId := n.Send(request.Dest, body)
+	responseChan := make(chan map[string]interface{}, 1)
+	n.mu.Lock()
+	n.pendingRequests[msgId] = responseChan
+	n.mu.Unlock()
+	select {
+	case resp := <-responseChan:
+		n.mu.Lock()
+		delete(n.pendingRequests, msgId)
+		n.mu.Unlock()
+		return resp, nil
+	case <-time.After(n.timeout):
+		n.mu.Lock()
+		delete(n.pendingRequests, msgId)
+		n.mu.Unlock()
+		close(responseChan)
+		return nil, fmt.Errorf("timeout")
+	}
 }
+func (n *Node) resolvePending(msg map[string]interface{}) {
+	if inReplyTo, ok := msg["in_reply_to"].(float64); ok {
+		n.mu.Lock()
+		ch, exists := n.pendingRequests[int(inReplyTo)]
+		delete(n.pendingRequests, int(inReplyTo))
+		n.mu.Unlock()
+		if exists {
+			ch <- msg
+		}
+	}
+}
+
 func main() {
 	node := &Node{
 		pendingRequests: make(map[int]chan map[string]interface{}),
@@ -90,6 +119,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Invalid JSON:", err)
 			continue
 		}
+		node.resolvePending(msg.Body)
 
 		// TODO: Validate message before processing
 		if valid, errMsg := ValidateMessage(msg); !valid {
